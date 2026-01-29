@@ -3,9 +3,13 @@ name: Feature Pipeline Hourly
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 * * * *"   # every hour
   push:
     branches: ["main"]
+    paths:
+      - ".github/workflows/features_hourly.yml"
+      - "aqi-islamabad-forecast/src/**"
+      - "aqi-islamabad-forecast/requirements.txt"
 
 jobs:
   run-feature-pipeline:
@@ -17,12 +21,17 @@ jobs:
       HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
       HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
       HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+
       CITY: Islamabad
       LAT: "33.6844"
       LON: "73.0479"
 
+      FEATURE_GROUP_NAME: aqi_features_v2
+      FEATURE_GROUP_VERSION: "1"
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,9 +40,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          cd aqi-islamabad-forecast
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run feature pipeline
         run: |
-          python src/feature_pipeline.py
+          cd aqi-islamabad-forecast
+          python -c "print('Starting feature pipeline...')"
+          python -m src.feature_pipeline
