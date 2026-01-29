@@ -3,24 +3,17 @@ name: Feature Pipeline Hourly
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0 * * * *"   # every hour (UTC)
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - ".github/workflows/features_hourly.yml"
+      - "requirements.txt"
 
 jobs:
   run-feature-pipeline:
     runs-on: ubuntu-latest
-
-    env:
-      AQICN_TOKEN: ${{ secrets.AQICN_TOKEN }}
-      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-      HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
-      HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
-      HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-      HOPSWORKS_FEATURE_GROUP: ${{ secrets.HOPSWORKS_FEATURE_GROUP }}
-      CITY: Islamabad
-      LAT: "33.6844"
-      LON: "73.0479"
 
     steps:
       - name: Checkout
@@ -37,6 +30,16 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run feature pipeline
+        env:
+          AQICN_TOKEN: ${{ secrets.AQICN_TOKEN }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
+          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+
+          CITY: Islamabad
+          FEATURE_GROUP_NAME: aqi_features_v2
+          FEATURE_GROUP_VERSION: "1"
         run: |
           python -c "print('Starting feature pipeline...')"
-          python -m src.feature_pipeline
+          python src/feature_pipeline.py
