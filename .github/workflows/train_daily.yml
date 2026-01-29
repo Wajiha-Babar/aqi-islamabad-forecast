@@ -3,17 +3,24 @@ name: Train Pipeline Daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * *"   # daily at 00:00 UTC
   push:
-    branches: ["main"]
-    paths:
-      - "src/train_models.py"
-      - ".github/workflows/train_daily.yml"
-      - "requirements.txt"
+    branches: [ "main" ]
 
 jobs:
   train-model:
     runs-on: ubuntu-latest
+
+    env:
+      AQICN_TOKEN: ${{ secrets.AQICN_TOKEN }}
+      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+      HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
+      HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+      HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+
+      CITY: Islamabad
+      FEATURE_GROUP_NAME: aqi_features_v2
+      FEATURE_GROUP_VERSION: "1"
 
     steps:
       - name: Checkout
@@ -30,16 +37,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Train model
-        env:
-          AQICN_TOKEN: ${{ secrets.AQICN_TOKEN }}
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
-          HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
-          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-
-          CITY: Islamabad
-          FEATURE_GROUP_NAME: aqi_features_v2
-          FEATURE_GROUP_VERSION: "1"
         run: |
           python -c "print('Starting training...')"
           python src/train_models.py
