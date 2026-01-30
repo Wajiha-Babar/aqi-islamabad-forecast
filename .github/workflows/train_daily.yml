@@ -41,6 +41,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug - show files
+        run: |
+          cd aqi-islamabad-forecast
+          pwd
+          ls -la
+          ls -la src
+          test -f src/train_models.py && echo "FOUND train_models.py" || (echo "MISSING train_models.py" && exit 1)
+
       - name: Train model
         run: |
           cd aqi-islamabad-forecast

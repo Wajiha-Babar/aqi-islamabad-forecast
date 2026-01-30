@@ -3,7 +3,7 @@ name: Feature Pipeline Hourly
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0 * * * *"   # every hour (UTC)
   push:
     branches: ["main"]
     paths:
@@ -44,8 +44,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug - show files
+        run: |
+          cd aqi-islamabad-forecast
+          pwd
+          ls -la
+          ls -la src
+
       - name: Run feature pipeline
         run: |
           cd aqi-islamabad-forecast
           python -c "print('Starting feature pipeline...')"
-          python -m src.feature_pipeline
+          python src/feature_pipeline.py
