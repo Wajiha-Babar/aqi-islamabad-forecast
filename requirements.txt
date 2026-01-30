@@ -8,3 +8,5 @@ streamlit
 shap
 matplotlib
 hopsworks
+hopsworks[python]
+confluent-kafka
