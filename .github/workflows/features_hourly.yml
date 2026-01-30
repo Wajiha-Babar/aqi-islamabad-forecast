@@ -44,13 +44,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Debug - show files
-        run: |
-          cd aqi-islamabad-forecast
-          pwd
-          ls -la
-          ls -la src
-
       - name: Run feature pipeline
         run: |
           cd aqi-islamabad-forecast
