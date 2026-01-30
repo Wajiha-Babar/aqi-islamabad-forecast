@@ -3,13 +3,13 @@ name: Train Pipeline Daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"   # daily 00:00 UTC
+    - cron: "0 0 * * *"
   push:
     branches: ["main"]
     paths:
       - ".github/workflows/train_daily.yml"
-      - "aqi-islamabad-forecast/src/**"
-      - "aqi-islamabad-forecast/requirements.txt"
+      - "src/**"
+      - "requirements.txt"
 
 jobs:
   train-model:
@@ -27,8 +27,7 @@ jobs:
       FEATURE_GROUP_VERSION: "1"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,12 +36,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd aqi-islamabad-forecast
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Train model
         run: |
-          cd aqi-islamabad-forecast
           python -c "print('Starting training...')"
           python src/train_models.py

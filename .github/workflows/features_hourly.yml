@@ -3,13 +3,13 @@ name: Feature Pipeline Hourly
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # every hour (UTC)
+    - cron: "0 * * * *"
   push:
     branches: ["main"]
     paths:
       - ".github/workflows/features_hourly.yml"
-      - "aqi-islamabad-forecast/src/**"
-      - "aqi-islamabad-forecast/requirements.txt"
+      - "src/**"
+      - "requirements.txt"
 
 jobs:
   run-feature-pipeline:
@@ -25,13 +25,11 @@ jobs:
       CITY: Islamabad
       LAT: "33.6844"
       LON: "73.0479"
-
       FEATURE_GROUP_NAME: aqi_features_v2
       FEATURE_GROUP_VERSION: "1"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,12 +38,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd aqi-islamabad-forecast
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run feature pipeline
         run: |
-          cd aqi-islamabad-forecast
           python -c "print('Starting feature pipeline...')"
           python src/feature_pipeline.py
