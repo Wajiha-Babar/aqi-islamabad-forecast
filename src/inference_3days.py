@@ -90,7 +90,9 @@ def fetch_open_meteo_forecast_utc(lat: float, lon: float) -> pd.DataFrame:
         raise RuntimeError("Open-Meteo returned no hourly times.")
 
     # ✅ FIX: use "h" (not "H")
-    ts = pd.to_datetime(times, utc=True).dt.floor("h")
+    # ts = pd.to_datetime(times, utc=True).dt.floor("h")
+    ts = pd.to_datetime(times, utc=True).floor("h")
+
 
     df = pd.DataFrame({
         "timestamp_utc": ts,
