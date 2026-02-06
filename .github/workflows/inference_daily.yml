@@ -1,0 +1,52 @@
+name: Inference Pipeline Daily (3-day Forecast)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 0 * * *"   # daily 00:15 UTC (Pakistan time ~05:15)
+
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/inference_daily.yml"
+      - "src/inference_3days.py"
+      - "requirements.txt"
+
+jobs:
+  run-inference:
+    runs-on: ubuntu-latest
+
+    env:
+      HOPSWORKS_HOST: ${{ secrets.HOPSWORKS_HOST }}
+      HOPSWORKS_PROJECT: ${{ secrets.HOPSWORKS_PROJECT }}
+      HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+
+      CITY: Islamabad
+      LAT: "33.6844"
+      LON: "73.0479"
+
+      FEATURE_GROUP_NAME: aqi_features_v2
+      FEATURE_GROUP_VERSION: "1"
+
+      PRED_FG_NAME: aqi_predictions_3days
+      PRED_FG_VERSION: "1"
+
+      HAZARDOUS_THRESHOLD: "200"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run inference (3-day AQI forecast)
+        run: |
+          python -c "print('Starting inference...')"
+          python src/inference_3days.py
