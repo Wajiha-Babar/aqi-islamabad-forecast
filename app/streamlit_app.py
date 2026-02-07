@@ -18,42 +18,94 @@ from src.inference_3days import (
     OUTPUT_CSV,
     HAZARDOUS_THRESHOLD,
     PRED_FG_NAME,
-    PRED_FG_VERSION,
+    PRED_FG_VERSION,  # make sure this is 3 in inference_3days.py
 )
 
 HOPSWORKS_PROJECT = os.getenv("HOPSWORKS_PROJECT")
 HOPSWORKS_API_KEY = os.getenv("HOPSWORKS_API_KEY")
 HOPSWORKS_HOST = os.getenv("HOPSWORKS_HOST")
 
+if not HOPSWORKS_PROJECT or not HOPSWORKS_API_KEY or not HOPSWORKS_HOST:
+    raise ValueError("Missing Hopsworks env vars. Check .env")
+
 st.set_page_config(page_title="AQI Forecast (3 Models)", layout="wide")
 st.title("🌫️ AQI Forecast — Next 3 Days (72 hours)")
-st.caption("3 models predictions + best model (lowest RMSE from Hopsworks Model Registry) + hazardous alerts")
+st.caption("3 models predictions + best model (lowest RMSE from Model Registry) + hazardous alerts")
 
 
-def load_predictions_from_hopsworks() -> pd.DataFrame:
-    project = hopsworks.login(
+# -----------------------------
+# Hopsworks login (CACHED!)
+# -----------------------------
+@st.cache_resource(show_spinner=False)
+def get_hopsworks_project():
+    # ✅ cache login to avoid streamlit rerun breaking client state
+    return hopsworks.login(
         project=HOPSWORKS_PROJECT,
         api_key_value=HOPSWORKS_API_KEY,
         host=HOPSWORKS_HOST,
     )
+
+
+# -----------------------------
+# Loaders
+# -----------------------------
+def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [c.lower() for c in df.columns]
+
+    # timestamp_utc must exist
+    if "timestamp_utc" not in df.columns:
+        raise RuntimeError("Loaded data missing 'timestamp_utc'")
+
+    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
+
+    # event_time optional -> create
+    if "event_time" not in df.columns:
+        df["event_time"] = df["timestamp_utc"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    df["event_time"] = pd.to_datetime(df["event_time"], utc=True, errors="coerce")
+
+    # hazardous_alert normalize
+    if "hazardous_alert" in df.columns:
+        # supports True/False, 0/1, "True"/"False"
+        if df["hazardous_alert"].dtype != bool:
+            df["hazardous_alert"] = df["hazardous_alert"].astype(str).str.lower().isin(["true", "1", "yes"])
+    else:
+        # derive if missing
+        if "best_pred" in df.columns:
+            df["hazardous_alert"] = df["best_pred"].astype(float) >= float(HAZARDOUS_THRESHOLD)
+
+    df = df.dropna(subset=["timestamp_utc"]).sort_values("timestamp_utc")
+    return df
+
+
+def load_predictions_from_hopsworks() -> pd.DataFrame:
+    project = get_hopsworks_project()
     fs = project.get_feature_store()
     fg = fs.get_feature_group(PRED_FG_NAME, version=PRED_FG_VERSION)
-    df = fg.read()
 
-    # Parse timestamps
-    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
-    df["event_time"] = pd.to_datetime(df["event_time"], utc=True, errors="coerce")
-    df = df.sort_values("timestamp_utc")
+    # ✅ IMPORTANT: try ONLINE read first (avoids Hudi/Hive offline errors)
+    try:
+        df = fg.read(online=True)
+    except TypeError:
+        # older hsfs may not support online=True
+        df = fg.read()
+    except Exception:
+        # try Feature Query Service as fallback (offline)
+        try:
+            df = fg.select_all().read()
+        except Exception as e:
+            # re-raise to be caught by main try/except
+            raise e
 
-    return df
+    return _normalize_df(df)
 
 
 def load_predictions_fallback_csv() -> pd.DataFrame:
+    if not Path(OUTPUT_CSV).exists():
+        raise FileNotFoundError(f"CSV not found: {OUTPUT_CSV}")
+
     df = pd.read_csv(OUTPUT_CSV)
-    df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
-    df["event_time"] = pd.to_datetime(df["event_time"], utc=True, errors="coerce")
-    df = df.sort_values("timestamp_utc")
-    return df
+    return _normalize_df(df)
 
 
 # -----------------------------
@@ -74,22 +126,20 @@ if run_now:
 
 st.divider()
 
+
 # -----------------------------
-# Load predictions
+# Load predictions (Hopsworks -> CSV fallback)
 # -----------------------------
 df = None
 load_source = None
 
 try:
     df = load_predictions_from_hopsworks()
-    load_source = "Hopsworks Feature Store"
+    load_source = f"Hopsworks (FG={PRED_FG_NAME} v{PRED_FG_VERSION})"
 except Exception as e:
     st.warning(f"Could not load from Hopsworks, using CSV.\n\nError: {e}")
-    if Path(OUTPUT_CSV).exists():
-        df = load_predictions_fallback_csv()
-        load_source = "Local CSV"
-    else:
-        df = None
+    df = load_predictions_fallback_csv()
+    load_source = f"Local CSV ({OUTPUT_CSV})"
 
 if df is None or df.empty:
     st.error("No predictions found. Click **Run inference now**.")
@@ -97,14 +147,19 @@ if df is None or df.empty:
 
 st.info(f"Loaded predictions from: **{load_source}** | Rows: {len(df)}")
 
-# IMPORTANT: Hopsworks converted prediction column names to lowercase
-# So we support both (CSV has uppercase, Hopsworks has lowercase)
-def get_col(df, upper, lower):
-    return lower if lower in df.columns else upper
 
-col_rf = get_col(df, "pred_RandomForest", "pred_randomforest")
-col_ridge = get_col(df, "pred_Ridge", "pred_ridge")
-col_mlp = get_col(df, "pred_NeuralNet", "pred_neuralnet")
+# -----------------------------
+# Columns (lowercase)
+# -----------------------------
+# Your inference writes these (after our fixes)
+col_rf = "pred_randomforest"
+col_ridge = "pred_ridge"
+col_mlp = "pred_neuralnet"
+
+missing = [c for c in ["best_pred", "best_model", "best_model_rmse", col_rf, col_ridge, col_mlp] if c not in df.columns]
+if missing:
+    st.error(f"Missing columns in loaded data: {missing}")
+    st.stop()
 
 best_model = str(df["best_model"].iloc[-1])
 best_rmse = float(df["best_model_rmse"].iloc[-1])

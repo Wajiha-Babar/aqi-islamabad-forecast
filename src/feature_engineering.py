@@ -23,6 +23,8 @@ df["aqi_roll24"] = df["aqi"].rolling(24).mean()
 df["aqi_roll7d"] = df["aqi"].rolling(24*7).mean()
 
 # ✅ 5) AQI change rate
-df["aqi_diff1"] = df["aqi"] - df["aqi_lag1"]
+# df["aqi_diff1"] = df["aqi"] - df["aqi_lag1"]
+df["aqi_lag2"] = df["aqi"].shift(2)
+df["aqi_diff1"] = df["aqi_lag1"] - df["aqi_lag2"]
 
 print(df[["aqi","aqi_lag1","aqi_lag24","aqi_roll24","aqi_roll7d","aqi_diff1"]].head(50))
