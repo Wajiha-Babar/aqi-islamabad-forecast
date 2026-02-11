@@ -73,14 +73,14 @@ pip install -r requirements.txt
 The dashboard provides:
 
 <p align="center">
-  <img src="assets/dashboard_1.jpeg" width="850">
+  <img src=<img src="assets/dashboard.png" width="850"> width="850">
 </p>
 
 <p align="center">
-  <img src="assets/dashboard_2.jpeg" width="850">
+  <img src="assets/dashboard_1.jpeg" width="850">
 </p>
 <p align="center">
-  <img src="assets/dashboard.png" width="850">
+  <img src="assets/dashboard_2.jpeg" width="850">
 </p>
 Model performance comparison
 Best model RMSE
