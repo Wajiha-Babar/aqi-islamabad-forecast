@@ -78,13 +78,6 @@ The dashboard provides:
 - AQI prediction trends  
 - Hazardous air quality alerts  
 - CSV export option  
-## 📊 Output Example
-
-![Dashboard](assets/dashboard.png)
-
-![Dashboard 1](assets/dashboard_1.jpeg)
-
-![Dashboard 2](assets/dashboard_2.jpeg)
 👩‍💻 Author
 Wajiha Babar
 Department of Software Engineering
