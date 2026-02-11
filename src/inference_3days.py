@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
@@ -19,7 +20,7 @@ FEATURE_GROUP_NAME = "aqi_features_v2"
 FEATURE_GROUP_VERSION = 1
 
 PRED_FG_NAME = "aqi_predictions_3days"
-PRED_FG_VERSION = 3  # ✅ IMPORTANT: bump version to create new schema
+PRED_FG_VERSION = 3  # same as yours
 
 CITY = "Islamabad"
 LAT, LON = 33.6844, 73.0479
@@ -94,7 +95,9 @@ def fetch_open_meteo_forecast_utc(lat: float, lon: float) -> pd.DataFrame:
     })
     return df.dropna().drop_duplicates(subset=["timestamp_utc"]).sort_values("timestamp_utc")
 
+# ✅ UPDATED: robust RMSE extraction (metrics OR description fallback)
 def extract_rmse(model_meta) -> float:
+    # try common dict fields first
     for attr in ["training_metrics", "metrics"]:
         m = getattr(model_meta, attr, None)
         if isinstance(m, dict) and m:
@@ -103,6 +106,14 @@ def extract_rmse(model_meta) -> float:
             for k, v in m.items():
                 if "rmse" in str(k).lower():
                     return float(v)
+
+    # fallback: parse from description like "... | rmse=12.345"
+    desc = getattr(model_meta, "description", "") or ""
+    match = re.search(r"rmse\s*=\s*([0-9]*\.?[0-9]+)", desc, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+
+    # last fallback
     return 1e18
 
 def download_and_load_latest_model(mr, model_name: str):
@@ -112,26 +123,19 @@ def download_and_load_latest_model(mr, model_name: str):
 
     latest = sorted(versions, key=lambda x: x.version)[-1]
     meta = mr.get_model(model_name, version=latest.version)
-    model_dir = Path(meta.download())
 
+    model_dir = Path(meta.download())
     candidates = list(model_dir.rglob("*.pkl")) + list(model_dir.rglob("*.joblib"))
     if not candidates:
         raise RuntimeError(f"Downloaded model but no .pkl/.joblib found in: {model_dir}")
 
     model_obj = joblib.load(candidates[0])
-    rmse = extract_rmse(meta)
+    rmse = extract_rmse(meta)  # ✅ updated
     return model_obj, float(rmse), int(latest.version)
 
 def load_history_from_feature_store(fs, days: int = 40) -> pd.DataFrame:
     fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
-    try:
-        df = fg.read()
-    except ValueError as e:
-        msg = str(e).lower()
-        if "hive" in msg and "not supported" in msg:
-            df = fg.select_all().read()
-        else:
-            raise
+    df = fg.read()
 
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True).dt.floor("h")
     df = df.sort_values("timestamp_utc").dropna(subset=["aqi"]).copy()
@@ -172,31 +176,6 @@ def compute_engineered_features(history_aqi: pd.Series) -> Dict[str, float]:
         "aqi_diff1": aqi_diff1,
     }
 
-# def save_predictions_to_feature_store(fs, df_preds: pd.DataFrame):
-#     fg = fs.get_or_create_feature_group(
-#         name=PRED_FG_NAME,
-#         version=PRED_FG_VERSION,
-#         primary_key=["city", "event_time"],
-#         description="Next 3 days AQI predictions (3 models + best model + alerts)",
-#         online_enabled=True,
-#     )
-#     df_preds = df_preds.copy()
-
-#     # ✅ make keys + timestamps spark-safe (string)
-#     df_preds["event_time"] = pd.to_datetime(df_preds["timestamp_utc"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-#     df_preds["timestamp_utc"] = pd.to_datetime(df_preds["timestamp_utc"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-#     # ✅ boolean -> int (spark-safe)
-#     if "hazardous_alert" in df_preds.columns:
-#         df_preds["hazardous_alert"] = df_preds["hazardous_alert"].astype(int)
-
-#     # ✅ lowercase columns (avoid warning)
-#     df_preds.columns = [c.lower() for c in df_preds.columns]
-
-#     print("✅ Writing predictions to Feature Store (upsert)...")
-#     # ✅ do NOT wait for offline materialization job
-#     fg.insert(df_preds, write_options={"wait_for_job": False, "upsert": True})
-#     print("✅ Predictions stored (online).")
 def save_predictions_to_feature_store(fs, df_preds: pd.DataFrame):
     fg = fs.get_or_create_feature_group(
         name=PRED_FG_NAME,
@@ -208,20 +187,18 @@ def save_predictions_to_feature_store(fs, df_preds: pd.DataFrame):
 
     df_preds = df_preds.copy()
 
-    # ✅ event_time string PK
     if "event_time" not in df_preds.columns:
         df_preds["event_time"] = pd.to_datetime(df_preds["timestamp_utc"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # ✅ keep original types (IMPORTANT)
-    df_preds["timestamp_utc"] = pd.to_datetime(df_preds["timestamp_utc"], utc=True)   # stays TIMESTAMP
-    df_preds["hazardous_alert"] = df_preds["hazardous_alert"].astype(bool)            # stays BOOLEAN
+    df_preds["timestamp_utc"] = pd.to_datetime(df_preds["timestamp_utc"], utc=True)
+    df_preds["hazardous_alert"] = df_preds["hazardous_alert"].astype(bool)
 
-    # ✅ lowercase (optional)
     df_preds.columns = [c.lower() for c in df_preds.columns]
 
     print("✅ Writing predictions to Feature Store (upsert)...")
     fg.insert(df_preds, write_options={"wait_for_job": False, "upsert": True})
     print("✅ Predictions stored (online).")
+
 
 # -----------------------------
 # MAIN
@@ -302,11 +279,9 @@ def run_inference_3days() -> Tuple[pd.DataFrame, str, float]:
         rows.append({
             "timestamp_utc": ts,
             "city": CITY,
-
             **base_features,
             **eng,
 
-            # ✅ lowercase-friendly names
             "pred_randomforest": pred_rf,
             "pred_ridge": pred_ridge,
             "pred_neuralnet": pred_mlp,
@@ -316,7 +291,6 @@ def run_inference_3days() -> Tuple[pd.DataFrame, str, float]:
             "best_pred": best_pred,
             "hazardous_alert": bool(best_pred >= HAZARDOUS_THRESHOLD),
 
-            # ✅ keep versions (now allowed in new FG v2)
             "rf_version": versions["RandomForest"],
             "ridge_version": versions["Ridge"],
             "mlp_version": versions["NeuralNet"],
@@ -336,4 +310,3 @@ def run_inference_3days() -> Tuple[pd.DataFrame, str, float]:
 
 if __name__ == "__main__":
     run_inference_3days()
-

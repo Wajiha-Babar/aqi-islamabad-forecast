@@ -47,13 +47,8 @@ MODEL_REGISTRY_NAMES = {
     "Best": "aqi_best_model",
 }
 
-# ✅ last ~6 months
 TRAIN_DAYS = 180
-
-# speed cap (optional)
 TRAIN_MAX_ROWS = 8000
-
-# ✅ time series test split (last 20% test)
 TEST_RATIO = 0.20
 
 RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -77,11 +72,6 @@ def time_split(X, y, test_ratio: float):
     return X.iloc[:split_idx], X.iloc[split_idx:], y.iloc[:split_idx], y.iloc[split_idx:]
 
 def print_ridge_formula(ridge_pipeline: Pipeline, feature_names: list, top_k: int = 12):
-    """
-    Ridge = formula based model:
-    y = intercept + sum(coef_i * scaled_feature_i)
-    (Because we scale features, coefficients correspond to scaled space)
-    """
     model = ridge_pipeline.named_steps["model"]
     coefs = model.coef_
     intercept = model.intercept_
@@ -92,11 +82,15 @@ def print_ridge_formula(ridge_pipeline: Pipeline, feature_names: list, top_k: in
     for name, c in pairs:
         print(f"  {name:>15}: {c:.6f}")
 
+# ✅ UPDATED: embed rmse in description so inference can ALWAYS read it reliably
 def register_model(mr, model_name: str, model_path: str, metrics: dict, description: str):
+    rmse = metrics.get("rmse", None)
+    desc = f"{description} | rmse={rmse}"  # ✅ stable
+
     model = mr.python.create_model(
         name=model_name,
-        metrics=metrics,
-        description=description,
+        metrics=metrics,          # keep as-is
+        description=desc,         # ✅ updated
     )
     model.save(model_path)
     print(f"✅ Saved to Registry: {model_name}")
@@ -121,31 +115,27 @@ fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
 df = fg.read()
 print("Data loaded:", df.shape)
 
-# sort time
 df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True).dt.floor("h")
 df = df.sort_values("timestamp_utc").reset_index(drop=True)
 
-# ✅ last 6 months filter
 cutoff = df["timestamp_utc"].max() - pd.Timedelta(days=TRAIN_DAYS)
 df = df[df["timestamp_utc"] >= cutoff].copy()
 
-# ✅ speed cap
 if len(df) > TRAIN_MAX_ROWS:
     df = df.iloc[-TRAIN_MAX_ROWS:].copy()
 
 print(f"✅ Using last {TRAIN_DAYS} days. Rows now: {len(df)}")
 
 # -----------------------------
-# ENGINEERED FEATURES (FIXED, no leakage)
+# ENGINEERED FEATURES (no leakage)
 # -----------------------------
 df["aqi_lag1"] = df["aqi"].shift(1)
-df["aqi_lag2"] = df["aqi"].shift(2)           # ✅ NEW
+df["aqi_lag2"] = df["aqi"].shift(2)
 df["aqi_lag24"] = df["aqi"].shift(24)
 
-df["aqi_roll24"] = df["aqi"].shift(1).rolling(24).mean()      # ✅ uses past only
-df["aqi_roll7d"] = df["aqi"].shift(1).rolling(24 * 7).mean()  # ✅ past only
+df["aqi_roll24"] = df["aqi"].shift(1).rolling(24).mean()
+df["aqi_roll7d"] = df["aqi"].shift(1).rolling(24 * 7).mean()
 
-# ✅ IMPORTANT FIX: past-only diff (NOT using current aqi)
 df["aqi_diff1"] = df["aqi_lag1"] - df["aqi_lag2"]
 
 before = len(df)
@@ -155,7 +145,6 @@ print(f"Rows after engineered feature dropna: {after} (dropped {before - after})
 
 # -----------------------------
 # FEATURES & TARGET
-# Target = current AQI (not 3-days)
 # -----------------------------
 drop_cols = ["aqi", "timestamp_utc", "event_time", "city"]
 drop_cols = [c for c in drop_cols if c in df.columns]
@@ -167,7 +156,6 @@ print("\n✅ Final training feature columns:")
 print(list(X.columns))
 print("X shape:", X.shape)
 
-# ✅ Time-based split (no random leakage)
 X_train, X_test, y_train, y_test = time_split(X, y, TEST_RATIO)
 print("Train:", X_train.shape, "Test:", X_test.shape)
 
@@ -214,12 +202,9 @@ rf_metrics = evaluate("RandomForest", y_test, rf_pred)
 ridge_metrics = evaluate("Ridge", y_test, ridge_pred)
 mlp_metrics = evaluate("NeuralNet (MLP)", y_test, mlp_pred)
 
-# ✅ print formula terms for report
 print_ridge_formula(ridge, list(X.columns), top_k=12)
 
-# -----------------------------
-# Pick best (lowest RMSE)
-# -----------------------------
+# Pick best
 all_metrics = {
     "RandomForest": rf_metrics,
     "Ridge": ridge_metrics,
@@ -229,23 +214,17 @@ best_name = min(all_metrics.keys(), key=lambda k: all_metrics[k]["rmse"])
 best_metrics = all_metrics[best_name]
 print(f"\n🏆 BEST MODEL: {best_name}  -> {best_metrics}")
 
-# -----------------------------
-# Save local model files
-# -----------------------------
+# Save local
 os.makedirs("models", exist_ok=True)
 joblib.dump(rf, "models/random_forest.pkl")
 joblib.dump(ridge, "models/ridge.pkl")
 joblib.dump(mlp, "models/neural_net.pkl")
 
-# best copy
 best_path = "models/best_model.pkl"
 joblib.dump({"name": best_name, "model": {"RandomForest": rf, "Ridge": ridge, "NeuralNet": mlp}[best_name]}, best_path)
-
 print("\n✅ Models saved locally in /models")
 
-# -----------------------------
 # Save metrics proof
-# -----------------------------
 os.makedirs("outputs", exist_ok=True)
 metrics_path = f"outputs/metrics_{RUN_ID}.json"
 with open(metrics_path, "w", encoding="utf-8") as f:
@@ -261,9 +240,7 @@ with open(metrics_path, "w", encoding="utf-8") as f:
     }, f, indent=2)
 print("✅ Saved metrics:", metrics_path)
 
-# -----------------------------
-# Save to Hopsworks Model Registry
-# -----------------------------
+# Upload to Model Registry
 print("\n✅ Saving models to Hopsworks Model Registry...")
 
 register_model(
@@ -290,7 +267,6 @@ register_model(
     description=f"{MODEL_REGISTRY_NAMES['NeuralNet']} (MLP) (6 months, time-split). Run={RUN_ID}",
 )
 
-# optional: save best model name+metrics as separate entry
 register_model(
     mr,
     MODEL_REGISTRY_NAMES["Best"],
