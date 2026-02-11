@@ -15,6 +15,7 @@ https://aqi-islamabad-forecast.streamlit.app/
 - Random Forest Regressor  
 - Ridge Regression  
 - Neural Network (MLP)
+
 ✅ Automatic **Best Model Selection** (lowest RMSE)  
 ✅ Next **72-hour AQI Forecasting**  
 ✅ Hazardous AQI alerts when AQI ≥ 200  
@@ -70,14 +71,16 @@ Install dependencies:
 pip install -r requirements.txt
 📊 Output Example
 The dashboard provides:
+
 <p align="center">
-  <img src="assets/dashboard.png" width="800">
+  <img src="assets/dashboard_1.jpeg" width="850">
+</p>
+
+<p align="center">
+  <img src="assets/dashboard_2.jpeg" width="850">
 </p>
 <p align="center">
-  <img src="assets/dashboard (1).jpeg" width="800">
-</p>
-<p align="center">
-  <img src="assets/dashboard (2).jpeg" width="800">
+  <img src="assets/dashboard.png" width="850">
 </p>
 Model performance comparison
 Best model RMSE
