@@ -7,6 +7,7 @@ import streamlit as st
 import hopsworks
 from dotenv import load_dotenv
 
+# ✅ Safe: locally .env load, cloud me ignore (no crash)
 load_dotenv()
 
 # Add project root so we can import src.*
@@ -22,14 +23,27 @@ from src.inference_3days import (
 )
 
 # -----------------------------
-# ENV
+# ENV (✅ Works on Streamlit Cloud + Local)
+# - Streamlit Cloud: st.secrets
+# - Local: .env via os.getenv
 # -----------------------------
-HOPSWORKS_PROJECT = os.getenv("HOPSWORKS_PROJECT")
-HOPSWORKS_API_KEY = os.getenv("HOPSWORKS_API_KEY")
-HOPSWORKS_HOST = os.getenv("HOPSWORKS_HOST")
+def _get_secret(key: str, default=None):
+    # Streamlit Cloud secrets first
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    # fallback to env
+    return os.getenv(key, default)
+
+HOPSWORKS_PROJECT = _get_secret("HOPSWORKS_PROJECT")
+HOPSWORKS_API_KEY = _get_secret("HOPSWORKS_API_KEY")
+HOPSWORKS_HOST = _get_secret("HOPSWORKS_HOST")
 
 if not HOPSWORKS_PROJECT or not HOPSWORKS_API_KEY or not HOPSWORKS_HOST:
-    raise ValueError("Missing Hopsworks env vars. Check .env")
+    st.error("❌ Missing Hopsworks secrets/env vars.")
+    st.stop()
 
 # -----------------------------
 # PAGE (Premium)
@@ -167,7 +181,7 @@ try:
 except Exception as e:
     st.warning(f"Could not load from Hopsworks; using CSV fallback.\n\nError: {e}")
     df = load_predictions_fallback_csv()
-    load_source = f"Local CSV: {OUTPUT_CSV}"
+    load_source = f"Local CSV ({OUTPUT_CSV})"
 
 if df is None or df.empty:
     st.error("No predictions found. Click **Run inference now**.")
@@ -192,7 +206,6 @@ if missing:
 best_model = str(df["best_model"].iloc[-1])
 best_rmse = float(df["best_model_rmse"].iloc[-1])
 latest_ts = df["timestamp_utc"].max()
-
 haz_count = int((df["hazardous_alert"] == True).sum())
 
 top = st.columns([1.2, 1.2, 1.2, 1.2])
