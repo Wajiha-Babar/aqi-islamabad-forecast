@@ -70,7 +70,8 @@ Make sure Python 3.10+ is installed.
 Install dependencies:
 pip install -r requirements.txt
 📊 Output Example
-```md
+
+## 📊 Output Example
 
 ![Dashboard](assets/dashboard.png)
 
@@ -80,12 +81,11 @@ pip install -r requirements.txt
 
 The dashboard provides:
 
-Model performance comparison
-Best model RMSE
-AQI prediction trends
-Hazardous air quality alerts
-CSV export option
-
+- Model performance comparison  
+- Best model RMSE  
+- AQI prediction trends  
+- Hazardous air quality alerts  
+- CSV export option  
 👩‍💻 Author
 Wajiha Babar
 Department of Software Engineering
