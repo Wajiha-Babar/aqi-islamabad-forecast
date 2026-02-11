@@ -69,16 +69,6 @@ https://aqi-islamabad-forecast.streamlit.app/
 Make sure Python 3.10+ is installed.
 Install dependencies:
 pip install -r requirements.txt
-📊 Output Example
-
-## 📊 Output Example
-## 📊 Output Example
-
-![Dashboard](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard.png)
-
-![Dashboard 1](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard_1.jpeg)
-
-![Dashboard 2](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard_2.jpeg)
 
 
 The dashboard provides:
@@ -88,6 +78,13 @@ The dashboard provides:
 - AQI prediction trends  
 - Hazardous air quality alerts  
 - CSV export option  
+## 📊 Output Example
+
+![Dashboard](assets/dashboard.png)
+
+![Dashboard 1](assets/dashboard_1.jpeg)
+
+![Dashboard 2](assets/dashboard_2.jpeg)
 👩‍💻 Author
 Wajiha Babar
 Department of Software Engineering
