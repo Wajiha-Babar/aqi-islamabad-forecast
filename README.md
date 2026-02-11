@@ -70,19 +70,15 @@ Make sure Python 3.10+ is installed.
 Install dependencies:
 pip install -r requirements.txt
 📊 Output Example
+```md
+
+![Dashboard](assets/dashboard.png)
+
+![Dashboard 1](assets/dashboard_1.jpeg)
+
+![Dashboard 2](assets/dashboard_2.jpeg)
+
 The dashboard provides:
-
-<p align="center">
-  <img src="assets/dashboard.png" width="850" />
-</p>
-
-<p align="center">
-  <img src="assets/dashboard_1.jpeg" width="850" />
-</p>
-
-<p align="center">
-  <img src="assets/dashboard_2.jpeg" width="850" />
-</p>
 
 Model performance comparison
 Best model RMSE
