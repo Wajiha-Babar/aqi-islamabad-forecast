@@ -72,12 +72,14 @@ pip install -r requirements.txt
 📊 Output Example
 
 ## 📊 Output Example
+## 📊 Output Example
 
-![Dashboard](assets/dashboard.png)
+![Dashboard](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard.png)
 
-![Dashboard 1](assets/dashboard_1.jpeg)
+![Dashboard 1](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard_1.jpeg)
 
-![Dashboard 2](assets/dashboard_2.jpeg)
+![Dashboard 2](https://raw.githubusercontent.com/Wajiha-Babar/aqi-islamabad-forecast/main/assets/dashboard_2.jpeg)
+
 
 The dashboard provides:
 
