@@ -57,7 +57,7 @@ st.set_page_config(
 )
 
 # -----------------------------
-# ✅ PREMIUM BLUE THEME
+#  THEME
 # -----------------------------
 st.markdown(
     """
@@ -458,7 +458,7 @@ for i in range(4):
 st.divider()
 
 # -----------------------------
-# ✅ Trend chart (UPDATED: NO DOTTED LINE + TIGHT X RANGE)
+# ✅ Trend chart 
 # -----------------------------
 st.markdown("## 📈 Air Quality Index — Historical & Forecast Trend (Clean)")
 
@@ -536,7 +536,7 @@ fig.add_annotation(
     borderpad=6,
 )
 
-# Predicted: SOLID line (NO dotted) + diamonds
+# Predicted: 
 fig.add_trace(
     go.Scatter(
         x=pred_clean["pk_time"],
