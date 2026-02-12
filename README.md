@@ -1,83 +1,108 @@
-# 🌫️ AQI Forecasting System — Islamabad (Next 72 Hours)
-This project is an **end-to-end Air Quality Index (AQI) forecasting system** built using the **Hopsworks Feature Store** and **Model Registry**.
-It automatically collects real-time environmental data, trains multiple machine learning models, selects the best-performing model based on RMSE, and generates hourly AQI predictions for the next **72 hours**.
-A fully deployed **Streamlit dashboard** provides interactive visualizations, model comparison, and hazardous air-quality alerts.
----
-## 🚀 Live Deployed App
+🌫️ AQI Forecasting System — Islamabad (Next 72 Hours)
 
-🔗 Streamlit Dashboard:  
+An end-to-end AQI forecasting system built with Hopsworks Feature Store + Model Registry.
+It ingests hourly environmental features, trains multiple ML models, automatically selects the best model using RMSE, and generates hourly AQI forecasts for the next 72 hours. A deployed Streamlit dashboard visualizes trends, model performance, and hazardous air-quality alerts.
+
+🚀 Live Deployed App
+
+Streamlit Dashboard:
 https://aqi-islamabad-forecast.streamlit.app/
 
----
-## 📌 Key Features
-✅ Hourly AQI feature ingestion using Hopsworks Feature Store  
+✨ Key Features
+
+✅ Hourly feature ingestion into Hopsworks Feature Store
+
 ✅ Daily training of 3 ML models:
-- Random Forest Regressor  
-- Ridge Regression  
-- Neural Network (MLP)
 
-✅ Automatic **Best Model Selection** (lowest RMSE)  
-✅ Next **72-hour AQI Forecasting**  
-✅ Hazardous AQI alerts when AQI ≥ 200  
-✅ Predictions stored back into Hopsworks Feature Group  
-✅ Professional Streamlit Dashboard for visualization & download
+Random Forest Regressor
 
----
+Ridge Regression
 
-## 🛠️ Tech Stack
+Neural Network (MLP)
 
-- **Python**
-- **Hopsworks Feature Store & Model Registry**
-- **Scikit-learn**
-- **Open-Meteo Weather Forecast API**
-- **Streamlit Dashboard**
-- **GitHub Actions (CI/CD Automation)**
+✅ Automatic best-model selection (lowest RMSE)
 
----
+✅ 72-hour AQI forecasting (hourly predictions)
 
-## 📂 Project Workflow
+✅ Hazardous AQI alerts when AQI ≥ 200
 
-### Step 1 — Feature Pipeline (Hourly Data Ingestion)
+✅ Predictions written back to Hopsworks Feature Group (online-enabled)
 
-Fetches weather + AQI data and stores engineered features into Hopsworks:
+✅ Professional Streamlit dashboard with interactive charts + CSV export
 
-```bash
+🛠️ Tech Stack
+
+Python
+
+Hopsworks (Feature Store & Model Registry)
+
+Scikit-learn
+
+Open-Meteo Weather Forecast API
+
+Streamlit
+
+GitHub Actions (CI/CD)
+
+🔄 Project Workflow
+Step 1 — Feature Pipeline (Hourly Ingestion)
+
+Fetches weather + AQI data, builds engineered features, and stores them in Hopsworks:
+
 python src/feature_pipeline.py
+
 Step 2 — Model Training (Daily)
-Trains all three models and uploads them into the Hopsworks Model Registry:
+
+Trains all models and uploads them to the Hopsworks Model Registry:
+
 python src/train_models.py
+
 Step 3 — Inference Pipeline (Next 72 Hours Forecast)
-Loads the latest models from registry, selects the best model, and generates predictions:
+
+Loads latest model versions, selects the best model, and generates predictions:
+
 python src/inference_3days.py
-Predictions are saved to:
+
+
+Outputs:
 
 outputs/predictions_3days.csv
 
-Hopsworks Feature Group: aqi_predictions_3days
+Hopsworks Feature Group: aqi_predictions_3days (version controlled via PRED_FG_VERSION)
 
-Step 4 — Launch Streamlit Dashboard
+Step 4 — Streamlit Dashboard
 
 Run locally:
 
 streamlit run app/streamlit_app.py
 
-Or view deployed version here:
 
+Or open deployed app:
 https://aqi-islamabad-forecast.streamlit.app/
 
-⚙️ Installation Requirements
-Make sure Python 3.10+ is installed.
+⚙️ Setup
+
+Requirements: Python 3.10+
 Install dependencies:
+
 pip install -r requirements.txt
 
 
-The dashboard provides:
+Make sure Hopsworks credentials are configured via .env (local) or Streamlit Secrets (deployment).
 
-- Model performance comparison  
-- Best model RMSE  
-- AQI prediction trends  
-- Hazardous air quality alerts  
-- CSV export option  
+📊 Dashboard Highlights
+
+Model performance comparison (RMSE)
+
+Best model selection + reason
+
+AQI trend (observed vs forecast)
+
+Hazardous air-quality alerts
+
+Forecast export (CSV)
+
 👩‍💻 Author
+
 Wajiha Babar
 Department of Software Engineering
