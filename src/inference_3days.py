@@ -11,8 +11,8 @@ import pandas as pd
 import requests
 import joblib
 import hopsworks
-
-
+MODEL_CACHE_DIR = Path("model_cache")
+MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # -----------------------------
 # SETTINGS
 # -----------------------------
@@ -112,22 +112,54 @@ def extract_rmse(model_meta) -> float:
 
     return 1e18
 
+# def download_and_load_latest_model(mr, model_name: str):
+#     versions = mr.get_models(model_name)
+#     if not versions:
+#         raise RuntimeError(f"No versions found for model '{model_name}'")
+
+#     latest = sorted(versions, key=lambda x: x.version)[-1]
+#     meta = mr.get_model(model_name, version=latest.version)
+
+#     model_dir = Path(meta.download())
+#     candidates = list(model_dir.rglob("*.pkl")) + list(model_dir.rglob("*.joblib"))
+#     if not candidates:
+#         raise RuntimeError(f"Downloaded model but no .pkl/.joblib found in: {model_dir}")
+
+#     model_obj = joblib.load(candidates[0])
+#     rmse = extract_rmse(meta)
+#     return model_obj, float(rmse), int(latest.version)
 def download_and_load_latest_model(mr, model_name: str):
     versions = mr.get_models(model_name)
     if not versions:
         raise RuntimeError(f"No versions found for model '{model_name}'")
 
     latest = sorted(versions, key=lambda x: x.version)[-1]
-    meta = mr.get_model(model_name, version=latest.version)
+    ver = int(latest.version)
 
+    # ✅ local cache path
+    local_path = MODEL_CACHE_DIR / f"{model_name}_v{ver}.joblib"
+
+    # ✅ if already cached -> load instantly
+    if local_path.exists():
+        model_obj = joblib.load(local_path)
+        meta = mr.get_model(model_name, version=ver)
+        rmse = extract_rmse(meta)
+        return model_obj, float(rmse), ver
+
+    # ✅ else download once
+    meta = mr.get_model(model_name, version=ver)
     model_dir = Path(meta.download())
     candidates = list(model_dir.rglob("*.pkl")) + list(model_dir.rglob("*.joblib"))
     if not candidates:
         raise RuntimeError(f"Downloaded model but no .pkl/.joblib found in: {model_dir}")
 
     model_obj = joblib.load(candidates[0])
+
+    # ✅ save to cache for next runs
+    joblib.dump(model_obj, local_path)
+
     rmse = extract_rmse(meta)
-    return model_obj, float(rmse), int(latest.version)
+    return model_obj, float(rmse), ver
 
 def load_history_from_feature_store(fs, days: int = 40) -> pd.DataFrame:
     fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
