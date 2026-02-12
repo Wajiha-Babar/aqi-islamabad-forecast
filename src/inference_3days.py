@@ -20,7 +20,7 @@ FEATURE_GROUP_NAME = "aqi_features_v2"
 FEATURE_GROUP_VERSION = 1
 
 PRED_FG_NAME = "aqi_predictions_3days"
-PRED_FG_VERSION = 3  # same as yours
+PRED_FG_VERSION = 4
 
 CITY = "Islamabad"
 LAT, LON = 33.6844, 73.0479
@@ -95,9 +95,7 @@ def fetch_open_meteo_forecast_utc(lat: float, lon: float) -> pd.DataFrame:
     })
     return df.dropna().drop_duplicates(subset=["timestamp_utc"]).sort_values("timestamp_utc")
 
-# ✅ UPDATED: robust RMSE extraction (metrics OR description fallback)
 def extract_rmse(model_meta) -> float:
-    # try common dict fields first
     for attr in ["training_metrics", "metrics"]:
         m = getattr(model_meta, attr, None)
         if isinstance(m, dict) and m:
@@ -107,13 +105,11 @@ def extract_rmse(model_meta) -> float:
                 if "rmse" in str(k).lower():
                     return float(v)
 
-    # fallback: parse from description like "... | rmse=12.345"
     desc = getattr(model_meta, "description", "") or ""
     match = re.search(r"rmse\s*=\s*([0-9]*\.?[0-9]+)", desc, re.IGNORECASE)
     if match:
         return float(match.group(1))
 
-    # last fallback
     return 1e18
 
 def download_and_load_latest_model(mr, model_name: str):
@@ -130,7 +126,7 @@ def download_and_load_latest_model(mr, model_name: str):
         raise RuntimeError(f"Downloaded model but no .pkl/.joblib found in: {model_dir}")
 
     model_obj = joblib.load(candidates[0])
-    rmse = extract_rmse(meta)  # ✅ updated
+    rmse = extract_rmse(meta)
     return model_obj, float(rmse), int(latest.version)
 
 def load_history_from_feature_store(fs, days: int = 40) -> pd.DataFrame:
@@ -147,7 +143,12 @@ def load_history_from_feature_store(fs, days: int = 40) -> pd.DataFrame:
     if df.empty:
         raise RuntimeError("History is empty.")
 
-    df = df[["timestamp_utc", "aqi"]].drop_duplicates(subset=["timestamp_utc"]).set_index("timestamp_utc").sort_index()
+    df = (
+        df[["timestamp_utc", "aqi"]]
+        .drop_duplicates(subset=["timestamp_utc"])
+        .set_index("timestamp_utc")
+        .sort_index()
+    )
 
     full_idx = pd.date_range(df.index.min(), df.index.max(), freq="h", tz="UTC")
     df = df.reindex(full_idx)
@@ -181,7 +182,7 @@ def save_predictions_to_feature_store(fs, df_preds: pd.DataFrame):
         name=PRED_FG_NAME,
         version=PRED_FG_VERSION,
         primary_key=["city", "event_time"],
-        description="Next 3 days AQI predictions (3 models + best model + alerts)",
+        description="Next 3 days AQI predictions (3 models + best + RMSEs + alerts)",
         online_enabled=True,
     )
 
@@ -229,9 +230,15 @@ def run_inference_3days() -> Tuple[pd.DataFrame, str, float]:
         versions[pretty] = int(ver)
         print(f"   -> {pretty}: v{ver} rmse={rmse}")
 
+    # ✅ NEW: store individual RMSEs
+    rmse_rf = float(rmses["RandomForest"])
+    rmse_ridge = float(rmses["Ridge"])
+    rmse_mlp = float(rmses["NeuralNet"])
+
     print("✅ Step 4: Choose BEST model...")
     best_model = min(rmses.keys(), key=lambda k: rmses[k])
     best_rmse = float(rmses[best_model])
+    best_reason = f"Selected because it has the lowest RMSE ({best_rmse:.6f}) among all models."
     print(f"🏆 BEST: {best_model} | RMSE={best_rmse:.6f}")
 
     print("✅ Step 5: Fetch weather forecast for next 72 hours...")
@@ -286,9 +293,17 @@ def run_inference_3days() -> Tuple[pd.DataFrame, str, float]:
             "pred_ridge": pred_ridge,
             "pred_neuralnet": pred_mlp,
 
+            # ✅ BEST INFO
             "best_model": best_model,
             "best_model_rmse": best_rmse,
+            "best_reason": best_reason,
             "best_pred": best_pred,
+
+            # ✅ NEW: individual RMSE columns (same for all 72 rows)
+            "rmse_randomforest": rmse_rf,
+            "rmse_ridge": rmse_ridge,
+            "rmse_neuralnet": rmse_mlp,
+
             "hazardous_alert": bool(best_pred >= HAZARDOUS_THRESHOLD),
 
             "rf_version": versions["RandomForest"],

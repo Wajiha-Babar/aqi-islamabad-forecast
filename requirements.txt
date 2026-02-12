@@ -10,3 +10,5 @@ matplotlib
 hopsworks
 hopsworks[python]
 confluent-kafka
+plotly
+streamlit-autorefresh

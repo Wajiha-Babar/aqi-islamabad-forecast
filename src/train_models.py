@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # loads .env from project root
+load_dotenv()  # loads .env
 
 import os
 import json
@@ -20,7 +20,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
 # -----------------------------
-# ENV (from .env)
+# ENV
 # -----------------------------
 HOPSWORKS_PROJECT = os.getenv("HOPSWORKS_PROJECT")
 HOPSWORKS_API_KEY = os.getenv("HOPSWORKS_API_KEY")
@@ -29,13 +29,11 @@ HOPSWORKS_HOST = os.getenv("HOPSWORKS_HOST")
 if not HOPSWORKS_PROJECT or not HOPSWORKS_API_KEY or not HOPSWORKS_HOST:
     raise ValueError(
         "Missing Hopsworks env vars. Ensure .env has:\n"
-        "HOPSWORKS_PROJECT=...\n"
-        "HOPSWORKS_API_KEY=...\n"
-        "HOPSWORKS_HOST=...\n"
+        "HOPSWORKS_PROJECT=...\nHOPSWORKS_API_KEY=...\nHOPSWORKS_HOST=...\n"
     )
 
 # -----------------------------
-# SETTINGS (same)
+# SETTINGS
 # -----------------------------
 FEATURE_GROUP_NAME = "aqi_features_v2"
 FEATURE_GROUP_VERSION = 1
@@ -44,7 +42,7 @@ MODEL_REGISTRY_NAMES = {
     "RandomForest": "aqi_random_forest",
     "Ridge": "aqi_ridge",
     "NeuralNet": "aqi_neural_net",
-    "Best": "aqi_best_model",
+    # "Best": "aqi_best_model",  # optional (see note below)
 }
 
 TRAIN_DAYS = 180
@@ -75,22 +73,20 @@ def print_ridge_formula(ridge_pipeline: Pipeline, feature_names: list, top_k: in
     model = ridge_pipeline.named_steps["model"]
     coefs = model.coef_
     intercept = model.intercept_
-
     pairs = sorted(zip(feature_names, coefs), key=lambda x: abs(x[1]), reverse=True)[:top_k]
-    print("\n📌 Ridge (formula-based) learned equation (top terms):")
+    print("\n📌 Ridge learned equation (top terms):")
     print(f"Intercept: {intercept:.6f}")
-    for name, c in pairs:
-        print(f"  {name:>15}: {c:.6f}")
+    for fname, c in pairs:
+        print(f"  {fname:>15}: {c:.6f}")
 
-# ✅ UPDATED: embed rmse in description so inference can ALWAYS read it reliably
 def register_model(mr, model_name: str, model_path: str, metrics: dict, description: str):
-    rmse = metrics.get("rmse", None)
-    desc = f"{description} | rmse={rmse}"  # ✅ stable
+    rmse = float(metrics.get("rmse", 1e18))  # ✅ ensure numeric
+    desc = f"{description} | rmse={rmse:.6f}"  # ✅ stable parsing for inference
 
     model = mr.python.create_model(
         name=model_name,
-        metrics=metrics,          # keep as-is
-        description=desc,         # ✅ updated
+        metrics=metrics,
+        description=desc,
     )
     model.save(model_path)
     print(f"✅ Saved to Registry: {model_name}")
@@ -115,8 +111,14 @@ fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
 df = fg.read()
 print("Data loaded:", df.shape)
 
-df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True).dt.floor("h")
-df = df.sort_values("timestamp_utc").reset_index(drop=True)
+# Normalize + clean
+df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce").dt.floor("h")
+df = df.dropna(subset=["timestamp_utc"]).sort_values("timestamp_utc").reset_index(drop=True)
+df = df.drop_duplicates(subset=["timestamp_utc"], keep="last")  # ✅ avoids dup rows
+
+# Ensure AQI numeric
+df["aqi"] = pd.to_numeric(df["aqi"], errors="coerce")
+df = df.dropna(subset=["aqi"]).copy()
 
 cutoff = df["timestamp_utc"].max() - pd.Timedelta(days=TRAIN_DAYS)
 df = df[df["timestamp_utc"] >= cutoff].copy()
@@ -204,27 +206,27 @@ mlp_metrics = evaluate("NeuralNet (MLP)", y_test, mlp_pred)
 
 print_ridge_formula(ridge, list(X.columns), top_k=12)
 
-# Pick best
-all_metrics = {
-    "RandomForest": rf_metrics,
-    "Ridge": ridge_metrics,
-    "NeuralNet": mlp_metrics,
-}
+all_metrics = {"RandomForest": rf_metrics, "Ridge": ridge_metrics, "NeuralNet": mlp_metrics}
 best_name = min(all_metrics.keys(), key=lambda k: all_metrics[k]["rmse"])
 best_metrics = all_metrics[best_name]
 print(f"\n🏆 BEST MODEL: {best_name}  -> {best_metrics}")
 
+# -----------------------------
 # Save local
+# -----------------------------
 os.makedirs("models", exist_ok=True)
 joblib.dump(rf, "models/random_forest.pkl")
 joblib.dump(ridge, "models/ridge.pkl")
 joblib.dump(mlp, "models/neural_net.pkl")
 
+# ✅ IMPORTANT FIX: best model file MUST be a model object (not dict)
 best_path = "models/best_model.pkl"
-joblib.dump({"name": best_name, "model": {"RandomForest": rf, "Ridge": ridge, "NeuralNet": mlp}[best_name]}, best_path)
+best_model_obj = {"RandomForest": rf, "Ridge": ridge, "NeuralNet": mlp}[best_name]
+joblib.dump(best_model_obj, best_path)
+
 print("\n✅ Models saved locally in /models")
 
-# Save metrics proof
+# Save metrics json
 os.makedirs("outputs", exist_ok=True)
 metrics_path = f"outputs/metrics_{RUN_ID}.json"
 with open(metrics_path, "w", encoding="utf-8") as f:
@@ -240,7 +242,9 @@ with open(metrics_path, "w", encoding="utf-8") as f:
     }, f, indent=2)
 print("✅ Saved metrics:", metrics_path)
 
+# -----------------------------
 # Upload to Model Registry
+# -----------------------------
 print("\n✅ Saving models to Hopsworks Model Registry...")
 
 register_model(
@@ -269,10 +273,10 @@ register_model(
 
 register_model(
     mr,
-    MODEL_REGISTRY_NAMES["Best"],
+    "aqi_best_model",
     best_path,
     best_metrics,
-    description=f"{MODEL_REGISTRY_NAMES['Best']} BEST={best_name} (6 months, time-split). Run={RUN_ID}",
+    description=f"aqi_best_model BEST={best_name} (6 months, time-split). Run={RUN_ID}",
 )
 
 print("\n🎉 DONE: Training + Registry upload completed!")
