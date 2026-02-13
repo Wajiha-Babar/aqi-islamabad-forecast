@@ -21,15 +21,11 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
-from src.inference_3days import (
-    run_inference_3days,
-    HAZARDOUS_THRESHOLD,
-    PRED_FG_NAME,
-)
+# Only need constants (NO inference run inside Streamlit for speed)
+from src.inference_3days import HAZARDOUS_THRESHOLD, PRED_FG_NAME
 
-# ✅ Keep this aligned with inference FG version
-PRED_FG_VERSION = int(os.getenv("PRED_FG_VERSION", "4"))
-
+#  versions from env/secrets (keep consistent with GitHub Actions)
+PRED_FG_VERSION = int(os.getenv("PRED_FG_VERSION", "1"))
 FEATURE_GROUP_NAME = os.getenv("HOPSWORKS_FEATURE_GROUP", "aqi_features_v2")
 FEATURE_GROUP_VERSION = int(os.getenv("HOPSWORKS_FEATURE_GROUP_VERSION", "1"))
 
@@ -44,7 +40,6 @@ def _get_secret(key: str, default=None):
         pass
     return os.getenv(key, default)
 
-
 HOPSWORKS_PROJECT = _get_secret("HOPSWORKS_PROJECT")
 HOPSWORKS_API_KEY = _get_secret("HOPSWORKS_API_KEY")
 HOPSWORKS_HOST = _get_secret("HOPSWORKS_HOST")
@@ -57,7 +52,13 @@ st.set_page_config(
 )
 
 # -----------------------------
-#  THEME
+# UI state 
+# -----------------------------
+if "tab" not in st.session_state:
+    st.session_state.tab = "🧾 Forecast Table"
+
+# -----------------------------
+# THEME (same)
 # -----------------------------
 st.markdown(
     """
@@ -136,7 +137,6 @@ def fmt(x, d=0, suffix=""):
     except Exception:
         return "—"
 
-
 def aqi_category(aqi: float):
     if aqi is None or pd.isna(aqi):
         return ("N/A", "⚪", "N/A", "No AQI data available.")
@@ -153,20 +153,35 @@ def aqi_category(aqi: float):
         return ("Very Unhealthy", "🟣", "Very Unhealthy", "Stay indoors where possible; consider air filtration.")
     return ("Hazardous", "🟤", "Hazardous", "Health alert: avoid going outside and follow strict precautions.")
 
-
 @st.cache_resource(show_spinner=False)
-def get_hw_project():
+def _hw_project_cached():
     return hopsworks.login(
         project=HOPSWORKS_PROJECT,
         api_key_value=HOPSWORKS_API_KEY,
         host=HOPSWORKS_HOST,
     )
 
+def get_hw_project_safe():
+    """
+    Fixes rare stale-client crash:
+    AttributeError: _client._project_id
+    """
+    try:
+        return _hw_project_cached()
+    except Exception:
+        try:
+            _hw_project_cached.clear()
+        except Exception:
+            pass
+        return hopsworks.login(
+            project=HOPSWORKS_PROJECT,
+            api_key_value=HOPSWORKS_API_KEY,
+            host=HOPSWORKS_HOST,
+        )
 
 def normalize_preds(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [c.lower() for c in df.columns]
-
     if "timestamp_utc" not in df.columns:
         return pd.DataFrame()
 
@@ -182,15 +197,14 @@ def normalize_preds(df: pd.DataFrame) -> pd.DataFrame:
     if "hazardous_alert" in df.columns and df["hazardous_alert"].dtype != bool:
         df["hazardous_alert"] = df["hazardous_alert"].astype(str).str.lower().isin(["true", "1", "yes"])
     elif "hazardous_alert" not in df.columns and "best_pred" in df.columns:
-        df["hazardous_alert"] = df["best_pred"].astype(float) >= float(HAZARDOUS_THRESHOLD)
+        df["hazardous_alert"] = pd.to_numeric(df["best_pred"], errors="coerce") >= float(HAZARDOUS_THRESHOLD)
 
     return df
 
-
 def slice_horizon(df: pd.DataFrame, hours: int = 72) -> pd.DataFrame:
     """
-    Always align to NEXT 72 hours from now (UTC), same as inference.
-    If data missing, rows remain NaN (we warn user instead of crashing).
+    Force show ONLY next 72 hours from now.
+    This prevents old rows staying on dashboard.
     """
     if df.empty or "timestamp_utc" not in df.columns:
         return df
@@ -198,28 +212,24 @@ def slice_horizon(df: pd.DataFrame, hours: int = 72) -> pd.DataFrame:
     df = df.copy()
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
     df = df.dropna(subset=["timestamp_utc"]).sort_values("timestamp_utc")
+    df = df.drop_duplicates(subset=["timestamp_utc"], keep="last").set_index("timestamp_utc")
 
     now = pd.Timestamp.now(tz="UTC")
     start = now.replace(minute=0, second=0, microsecond=0) + pd.Timedelta(hours=1)
     horizon = pd.date_range(start=start, periods=hours, freq="h", tz="UTC")
 
-    df = df.drop_duplicates(subset=["timestamp_utc"], keep="last").set_index("timestamp_utc")
-    out = df.reindex(horizon)
-
-    out = out.reset_index().rename(columns={"index": "timestamp_utc"})
+    out = df.reindex(horizon).reset_index().rename(columns={"index": "timestamp_utc"})
     out["pk_time"] = pd.to_datetime(out["timestamp_utc"], utc=True).dt.tz_convert("Asia/Karachi")
     return out
 
-
 PRED_COLS = [
-    "timestamp_utc", "event_time", "pk_time",
-    "best_pred", "best_model", "best_model_rmse", "best_reason", "hazardous_alert",
-    "pred_randomforest", "pred_ridge", "pred_neuralnet",
-    "rmse_randomforest", "rmse_ridge", "rmse_neuralnet",
-    "rf_version", "ridge_version", "mlp_version",
-    "temp_c", "humidity", "pressure", "wind_speed", "city",
+    "timestamp_utc","event_time","pk_time",
+    "best_pred","best_model","best_model_rmse","best_reason","hazardous_alert",
+    "pred_randomforest","pred_ridge","pred_neuralnet",
+    "rmse_randomforest","rmse_ridge","rmse_neuralnet",
+    "rf_version","ridge_version","mlp_version",
+    "temp_c","humidity","pressure","wind_speed","city",
 ]
-
 
 def get_or_create_pred_fg(fs):
     return fs.get_or_create_feature_group(
@@ -230,32 +240,30 @@ def get_or_create_pred_fg(fs):
         online_enabled=True,
     )
 
-
-@st.cache_data(ttl=120, show_spinner=False)
-def load_predictions_safe():
-    project = get_hw_project()
+@st.cache_data(ttl=60, show_spinner=False)
+def load_predictions_fast():
+    """
+    Fast load:
+    - online first
+    - slice to next 72 hours (always fresh)
+    """
+    project = get_hw_project_safe()
     fs = project.get_feature_store()
-
     fg = get_or_create_pred_fg(fs)
 
-    df_online = pd.DataFrame()
-    try:
-        df_online = fg.read(online=True)
-    except Exception:
-        df_online = pd.DataFrame()
-
-    if not df_online.empty:
-        df_online = normalize_preds(df_online)
-        keep = [c for c in PRED_COLS if c in df_online.columns]
-        df_online = df_online[keep].copy()
-        df_online = slice_horizon(df_online, 72)
-        return df_online
-
     df = pd.DataFrame()
+    # ✅ ONLINE first (fast + latest)
     try:
-        df = fg.read()
+        df = fg.read(online=True)
     except Exception:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+
+    # fallback to offline only if online empty
+    if df is None or df.empty:
+        try:
+            df = fg.read()
+        except Exception:
+            return pd.DataFrame()
 
     df = normalize_preds(df)
     if df.empty:
@@ -266,14 +274,22 @@ def load_predictions_safe():
     df = slice_horizon(df, 72)
     return df
 
-
-@st.cache_data(ttl=300, show_spinner=False)
-def load_history_7d():
-    project = get_hw_project()
+@st.cache_data(ttl=180, show_spinner=False)
+def load_history_last_7_days():
+    """
+    Fix for "history only till 6 Feb":
+    - read ONLINE first (latest)
+    - filter by last 7 days from MAX timestamp in data
+    """
+    project = get_hw_project_safe()
     fs = project.get_feature_store()
     fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
 
-    h = fg.read()
+    try:
+        h = fg.read(online=True)
+    except Exception:
+        h = fg.read()
+
     h.columns = [c.lower() for c in h.columns]
     if "timestamp_utc" not in h.columns:
         return pd.DataFrame()
@@ -281,14 +297,16 @@ def load_history_7d():
     h["timestamp_utc"] = pd.to_datetime(h["timestamp_utc"], utc=True, errors="coerce")
     h = h.dropna(subset=["timestamp_utc"]).sort_values("timestamp_utc")
 
+    if h.empty:
+        return pd.DataFrame()
+
     end = h["timestamp_utc"].max()
     start = end - pd.Timedelta(days=7)
     h = h[h["timestamp_utc"] >= start].copy()
     h["pk_time"] = h["timestamp_utc"].dt.tz_convert("Asia/Karachi")
 
-    keep = [c for c in ["pk_time", "timestamp_utc", "aqi", "temp_c", "humidity", "pressure", "wind_speed"] if c in h.columns]
+    keep = [c for c in ["pk_time","timestamp_utc","aqi","temp_c","humidity","pressure","wind_speed"] if c in h.columns]
     return h[keep].copy()
-
 
 def build_export_report(df_pred: pd.DataFrame) -> pd.DataFrame:
     view = df_pred.copy()
@@ -315,6 +333,9 @@ def build_export_report(df_pred: pd.DataFrame) -> pd.DataFrame:
         "Health_Recommendation": recs,
     })
 
+@st.cache_data(ttl=180, show_spinner=False)
+def export_cached(df_pred: pd.DataFrame) -> pd.DataFrame:
+    return build_export_report(df_pred)
 
 # -----------------------------
 # Sidebar
@@ -325,8 +346,9 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("## ⚙️ Actions")
-    run_now = st.button("🔄 Refresh Forecast (Run Inference)", use_container_width=True)
-    auto_refresh = st.toggle("Auto refresh (30s)", value=False)
+    # ✅ Fast refresh: ONLY clears cache & re-reads latest predictions
+    refresh_now = st.button("🔄 Refresh", use_container_width=True)
+    auto_refresh = st.toggle("Auto refresh (120s)", value=False)
     show_raw = st.toggle("Show raw tables", value=False)
 
     st.markdown("---")
@@ -339,11 +361,10 @@ with st.sidebar:
         """
 This dashboard delivers:
 
-- **Live AQI monitoring** with hourly updates  
-- **72-hour AI forecast** powered by **three trained models**  
-- **Automatic best-model selection** using the **lowest RMSE**  
-- **Interactive trend insights** and **historical context**  
-- **Export-ready reporting** for quick sharing  
+- **Live AQI monitoring** (Feature Store)  
+- **72-hour forecast** (GitHub Actions daily inference)  
+- **Automatic best-model selection** using **lowest RMSE**  
+- **Export-ready reporting**  
 
 <span class="small-note">Developed by <b>Wajiha Babar</b> • <b>2026</b></span>
 """,
@@ -351,7 +372,7 @@ This dashboard delivers:
     )
 
 if auto_refresh:
-    st_autorefresh(interval=30_000, key="auto_refresh")
+    st_autorefresh(interval=60_000, key="auto_refresh")
 
 # -----------------------------
 # Header
@@ -368,42 +389,31 @@ st.markdown(
 st.write("")
 
 # -----------------------------
-# Run inference on demand (and then re-read safely)
+# refresh behaviour
 # -----------------------------
-if run_now:
-    with st.spinner("Refreshing forecast… (models + weather + best selection)"):
-        _, best_name, best_rmse = run_inference_3days()
+if refresh_now:
+    st.cache_data.clear()
+    st.rerun()
 
-    st.success(f"Updated ✅ Best model: {best_name} | RMSE={best_rmse:.4f}")
-
-    with st.spinner("Syncing predictions from Feature Store…"):
-        df_pred = pd.DataFrame()
-        for _ in range(6):
-            df_pred = load_predictions_safe()
-            if not df_pred.empty and ("best_pred" in df_pred.columns) and df_pred["best_pred"].notna().sum() >= 50:
-                break
-            time.sleep(1.2)
-else:
-    df_pred = load_predictions_safe()
+# -----------------------------
+# Load Predictions 
+# -----------------------------
+df_pred = load_predictions_fast()
 
 if df_pred.empty or ("best_pred" not in df_pred.columns):
-    st.info("No predictions found yet. Click **Refresh Forecast (Run Inference)** to generate 72-hour forecast.")
+    st.info("No predictions found yet. (Wait for GitHub Actions inference run) then click **Refresh Data (Fast)**.")
     st.stop()
-
-missing = int(df_pred["best_pred"].isna().sum())
-if missing > 0:
-    st.warning(f"⚠️ Forecast incomplete: {missing}/72 hours missing. Click **Refresh Forecast** again to regenerate full horizon.")
 
 # -----------------------------
 # Current status card
 # -----------------------------
 first_valid_idx = df_pred["best_pred"].first_valid_index()
 if first_valid_idx is None:
-    st.error("Forecast rows exist but AQI values are missing. Please click **Refresh Forecast**.")
+    st.error("Forecast rows exist but AQI values are missing. Click **Refresh Data (Fast)**.")
     st.stop()
 
 current = df_pred.loc[first_valid_idx]
-curr_aqi = float(current.get("best_pred", 0.0))
+curr_aqi = float(pd.to_numeric(current.get("best_pred", np.nan), errors="coerce") or 0.0)
 _, emoji, pill, advice = aqi_category(curr_aqi)
 
 last_valid_idx = df_pred["best_pred"].last_valid_index()
@@ -458,15 +468,13 @@ for i in range(4):
 st.divider()
 
 # -----------------------------
-# ✅ Trend chart 
+# Trend chart (Observed + Best)
 # -----------------------------
 st.markdown("## 📈 Air Quality Index — Historical & Forecast Trend (Clean)")
 
-hist = load_history_7d()
-
+hist = load_history_last_7_days()
 if not hist.empty and "pk_time" in hist.columns:
     hist = hist.sort_values("pk_time").copy()
-    hist = hist[hist["pk_time"] >= (hist["pk_time"].max() - pd.Timedelta(days=4))].copy()
 
 if not hist.empty and "aqi" in hist.columns:
     hist["aqi"] = pd.to_numeric(hist["aqi"], errors="coerce").clip(lower=0, upper=500)
@@ -476,10 +484,6 @@ pred["best_pred"] = pd.to_numeric(pred["best_pred"], errors="coerce").clip(lower
 pred = pred.dropna(subset=["pk_time"]).sort_values("pk_time").reset_index(drop=True)
 
 pred_clean = pred.dropna(subset=["best_pred"]).copy()
-if pred_clean.empty:
-    st.info("Predictions not ready yet. Click **Refresh Forecast**.")
-    st.stop()
-
 forecast_start = pred_clean["pk_time"].min()
 forecast_end = pred_clean["pk_time"].max()
 
@@ -499,64 +503,27 @@ bands = [
 for lo, hi, color in bands:
     fig.add_hrect(y0=lo, y1=hi, fillcolor=color, line_width=0)
 
-# Observed: solid + small markers
 if not hist.empty and "aqi" in hist.columns:
     h = hist.dropna(subset=["pk_time", "aqi"]).copy()
-    fig.add_trace(
-        go.Scatter(
-            x=h["pk_time"],
-            y=h["aqi"],
-            mode="lines+markers",
-            name="Observed",
-            line=dict(width=3.0),
-            marker=dict(size=5, symbol="circle"),
-            hovertemplate="<b>%{x|%b %d, %I:%M %p}</b><br>AQI: <b>%{y:.0f}</b><extra></extra>",
-        )
-    )
+    fig.add_trace(go.Scatter(
+        x=h["pk_time"], y=h["aqi"],
+        mode="lines+markers", name="Observed",
+        line=dict(width=3.0),
+        marker=dict(size=5, symbol="circle"),
+        hovertemplate="<b>%{x|%b %d, %I:%M %p}</b><br>AQI: <b>%{y:.0f}</b><extra></extra>",
+    ))
 
-# Forecast shaded area
-fig.add_vrect(
-    x0=forecast_start,
-    x1=forecast_end,
-    fillcolor="rgba(59,130,246,0.10)",
-    line_width=0,
-)
-
-# Forecast start line + label
+fig.add_vrect(x0=forecast_start, x1=forecast_end, fillcolor="rgba(59,130,246,0.10)", line_width=0)
 fig.add_vline(x=forecast_start, line_width=2, line_dash="dash", opacity=0.9)
-fig.add_annotation(
-    x=forecast_start, y=1.05,
-    xref="x", yref="paper",
-    text="Forecast starts",
-    showarrow=False,
-    font=dict(size=12),
-    bgcolor="rgba(255,255,255,0.85)",
-    bordercolor="rgba(0,0,0,0.15)",
-    borderwidth=1,
-    borderpad=6,
-)
 
-# Predicted: 
-fig.add_trace(
-    go.Scatter(
-        x=pred_clean["pk_time"],
-        y=pred_clean["best_pred"],
-        mode="lines+markers",
-        name="Predicted (Best)",
-        line=dict(width=3.4),  # ✅ solid
-        marker=dict(size=6, symbol="diamond"),
-        hovertemplate="<b>%{x|%b %d, %I:%M %p}</b><br>Forecast AQI: <b>%{y:.0f}</b><extra></extra>",
-    )
-)
+fig.add_trace(go.Scatter(
+    x=pred_clean["pk_time"], y=pred_clean["best_pred"],
+    mode="lines+markers", name="Predicted (Best)",
+    line=dict(width=3.4),
+    marker=dict(size=6, symbol="diamond"),
+    hovertemplate="<b>%{x|%b %d, %I:%M %p}</b><br>Forecast AQI: <b>%{y:.0f}</b><extra></extra>",
+))
 
-# Day separators
-pred_clean["pk_day"] = pred_clean["pk_time"].dt.floor("D")
-days_sorted = sorted(pred_clean["pk_day"].unique())
-for i, d0 in enumerate(days_sorted[:3]):
-    fig.add_vline(x=d0, line_width=1, line_dash="dot", opacity=0.30)
-    fig.add_annotation(x=d0, y=1.01, xref="x", yref="paper", text=f"Day {i+1}", showarrow=False, font=dict(size=12))
-
-# smart Y zoom
 y_vals = []
 if not hist.empty and "aqi" in hist.columns:
     y_vals += list(hist["aqi"].dropna().astype(float).values)
@@ -579,6 +546,7 @@ fig.update_layout(
     template="plotly_white",
     paper_bgcolor="rgba(255,255,255,0.03)",
     plot_bgcolor="rgba(255,255,255,0.96)",
+    hovermode="x unified",
     legend=dict(
         orientation="h",
         yanchor="bottom",
@@ -589,40 +557,60 @@ fig.update_layout(
         bordercolor="rgba(0,0,0,0.12)",
         borderwidth=1,
     ),
-    hovermode="x unified",
 )
-
-fig.update_xaxes(
-    title="Time (PKT)",
-    showgrid=True,
-    gridcolor="rgba(0,0,0,0.08)",
-    zeroline=False,
-    range=[x_min, x_max],   # ✅ tight
-)
-fig.update_yaxes(
-    title="AQI",
-    showgrid=True,
-    gridcolor="rgba(0,0,0,0.08)",
-    zeroline=False,
-    range=[y0, y1],
-)
+fig.update_xaxes(title="Time (PKT)", showgrid=True, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[x_min, x_max])
+fig.update_yaxes(title="AQI", showgrid=True, gridcolor="rgba(0,0,0,0.08)", zeroline=False, range=[y0, y1])
 
 st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
-# Tabs
+# 3-model comparison chart
+# -----------------------------
+st.markdown("## 📉 3-Model Comparison — 72-hour Forecast (All Models)")
+
+m = df_pred.copy().dropna(subset=["pk_time"]).sort_values("pk_time")
+for c in ["pred_randomforest", "pred_ridge", "pred_neuralnet", "best_pred"]:
+    if c in m.columns:
+        m[c] = pd.to_numeric(m[c], errors="coerce").clip(lower=0, upper=500)
+
+fig2 = go.Figure()
+if "pred_randomforest" in m.columns:
+    fig2.add_trace(go.Scatter(x=m["pk_time"], y=m["pred_randomforest"], mode="lines", name="RandomForest"))
+if "pred_ridge" in m.columns:
+    fig2.add_trace(go.Scatter(x=m["pk_time"], y=m["pred_ridge"], mode="lines", name="Ridge"))
+if "pred_neuralnet" in m.columns:
+    fig2.add_trace(go.Scatter(x=m["pk_time"], y=m["pred_neuralnet"], mode="lines", name="NeuralNet (MLP)"))
+if "best_pred" in m.columns:
+    fig2.add_trace(go.Scatter(x=m["pk_time"], y=m["best_pred"], mode="lines", name="Best Selected", line=dict(width=4)))
+
+fig2.update_layout(
+    height=520,
+    template="plotly_white",
+    paper_bgcolor="rgba(255,255,255,0.03)",
+    plot_bgcolor="rgba(255,255,255,0.96)",
+    margin=dict(l=14, r=14, t=40, b=10),
+    hovermode="x unified",
+    legend=dict(orientation="h", y=1.12, x=1, xanchor="right",
+                bgcolor="rgba(255,255,255,0.65)", bordercolor="rgba(0,0,0,0.12)", borderwidth=1),
+)
+fig2.update_xaxes(title="Time (PKT)", gridcolor="rgba(0,0,0,0.08)")
+fig2.update_yaxes(title="AQI", gridcolor="rgba(0,0,0,0.08)")
+st.plotly_chart(fig2, use_container_width=True)
+
+# -----------------------------
+# Tabs (stable)
 # -----------------------------
 tab = st.radio(
     "Navigation",
     ["🧾 Forecast Table", "⬇️ Export Report", "🩺 Health Guidance", "📌 Data Insights", "📚 Historical Overview"],
     horizontal=True,
     label_visibility="collapsed",
+    key="tab",
 )
 
 if tab == "🧾 Forecast Table":
     st.markdown("## Complete Forecast Report")
-    report = build_export_report(df_pred)
-
+    report = export_cached(df_pred)
     st.dataframe(report, use_container_width=True, hide_index=True)
 
     st.write("")
@@ -649,8 +637,7 @@ elif tab == "⬇️ Export Report":
     )
     st.write("")
 
-    report = build_export_report(df_pred)
-
+    report = export_cached(df_pred)
     st.markdown('<div class="big-btn">', unsafe_allow_html=True)
     st.download_button(
         "⬇️ Download Forecast Report (CSV)",
@@ -717,8 +704,8 @@ elif tab == "📌 Data Insights":
 
 elif tab == "📚 Historical Overview":
     st.markdown("## Environmental Parameters — Historical Overview (Past 7 Days)")
+    hist2 = load_history_last_7_days()
 
-    hist2 = load_history_7d()
     if hist2.empty or "aqi" not in hist2.columns:
         st.info("History not available in aqi_features_v2 (or missing columns).")
     else:
