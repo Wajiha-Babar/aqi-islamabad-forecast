@@ -284,10 +284,7 @@ def load_history_last_7_days():
     project = get_hw_project_safe()
     fs = project.get_feature_store()
     fg = fs.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
-
-    try:
-        h = fg.read(online=True)
-    except Exception:
+   
         h = fg.read()
 
     h.columns = [c.lower() for c in h.columns]
